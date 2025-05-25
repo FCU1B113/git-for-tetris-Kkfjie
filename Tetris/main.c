@@ -1,4 +1,4 @@
-#include <stdio.h>
+ï»¿#include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
 #include <time.h>
@@ -10,21 +10,19 @@
 #define FALL_DELAY 500
 #define RENDER_DELAY 100
 
-// Áä½L¹ï·Óªí
+// æŒ‰éµå®šç¾©
 #define LEFT_KEY 0x25
 #define RIGHT_KEY 0x27 
 #define ROTATE_KEY 0x26 
 #define DOWN_KEY 0x28 
 #define FALL_KEY 0x20 
 
-// §PÂ_«öÁä¬O§_¦³³Q«ö¤Uªº¨ç¦¡
+// åˆ¤æ–·æŒ‰éµæ˜¯å¦è¢«æŒ‰ä¸‹çš„å‡½æ•¸
 #define LEFT_FUNC() GetAsyncKeyState(LEFT_KEY) & 0x8000
 #define RIGHT_FUNC() GetAsyncKeyState(RIGHT_KEY) & 0x8000
 #define ROTATE_FUNC() GetAsyncKeyState(ROTATE_KEY) & 0x8000
 #define DOWN_FUNC() GetAsyncKeyState(DOWN_KEY) & 0x8000
 #define FALL_FUNC() GetAsyncKeyState(FALL_KEY) & 0x8000
-
-
 
 typedef enum
 {
@@ -50,6 +48,13 @@ typedef enum
     Z
 } ShapeId;
 
+typedef enum
+{
+    SEEDS = 0,
+    PLANT = 1,
+    FLOWER = 2
+} PlantStage;
+
 typedef struct
 {
     ShapeId shape;
@@ -66,6 +71,7 @@ typedef struct
     int rotate;
     int fallTime;
     ShapeId queue[4];
+    PlantStage plantStage;
 } State;
 
 typedef struct
@@ -212,6 +218,40 @@ void resetBlock(Block* block)
     block->current = false;
 }
 
+void printPlant(PlantStage stage, int row, int col)
+{
+    switch (stage)
+    {
+    case SEEDS:
+        printf("\033[%d;%dH\033[33m", row, col);     // Yellow color for seeds
+        printf("  o o  ");
+        printf("\033[%d;%dH", row + 1, col);
+        printf(" o o o ");
+        printf("\033[%d;%dH", row + 2, col);
+        printf("_______");
+        break;
+
+    case PLANT:
+        printf("\033[%d;%dH\033[32m", row, col);     // Green color for plant
+        printf("  \\|/  ");
+        printf("\033[%d;%dH", row + 1, col);
+        printf("   |   ");
+        printf("\033[%d;%dH", row + 2, col);
+        printf("___|___");
+        break;
+
+    case FLOWER:
+        printf("\033[%d;%dH\033[35m", row, col);     // Magenta color for flower
+        printf(" \\o|o/ ");
+        printf("\033[%d;%dH\033[32m", row + 1, col); // Green stem
+        printf("   |   ");
+        printf("\033[%d;%dH", row + 2, col);
+        printf("___|___");
+        break;
+    }
+    printf("\033[0m"); // Reset color
+}
+
 void printCanvas(Block canvas[CANVAS_HEIGHT][CANVAS_WIDTH], State* state)
 {
     printf("\033[0;0H\n");
@@ -225,15 +265,26 @@ void printCanvas(Block canvas[CANVAS_HEIGHT][CANVAS_WIDTH], State* state)
         printf("\033[0m|\n");
     }
 
-    // ¿é¥XNext:
-    printf("\033[%d;%dHNext:", 3, CANVAS_WIDTH * 2 + 5);
-    // ¿é¥X¦³¬Æ»ò¤è¶ô
+    // é¡¯ç¤ºScore
+    printf("\033[%d;%dH\033[36mScore: %d\033[0m", 1, CANVAS_WIDTH * 2 + 5, state->score);
+
+    // é¡¯ç¤ºPlant Stage
+    printf("\033[%d;%dH\033[36mPlant Stage:", 2, CANVAS_WIDTH * 2 + 5);
+    const char* stageNames[] = { "Seeds", "Plant", "Flower" };
+    printf("\033[%d;%dH\033[36m%s\033[0m", 3, CANVAS_WIDTH * 2 + 5, stageNames[state->plantStage]);
+
+    // é¡¯ç¤ºæ¤ç‰©ASCIIåœ–æ¡ˆ
+    printPlant(state->plantStage, 4, CANVAS_WIDTH * 2 + 5);
+
+    // é¡¯ç¤ºNext:
+    printf("\033[%d;%dH\033[36mNext:\033[0m", 8, CANVAS_WIDTH * 2 + 5);
+    // é¡¯ç¤ºæ¥ä¸‹ä¾†çš„æ–¹å¡Š
     for (int i = 1; i <= 3; i++)
     {
         Shape shapeData = shapes[state->queue[i]];
         for (int j = 0; j < 4; j++)
         {
-            printf("\033[%d;%dH", i * 4 + j, CANVAS_WIDTH * 2 + 15);
+            printf("\033[%d;%dH", 8 + i * 4 + j, CANVAS_WIDTH * 2 + 15);
             for (int k = 0; k < 4; k++)
             {
                 if (j < shapeData.size && k < shapeData.size && shapeData.rotates[0][j][k])
@@ -255,19 +306,19 @@ bool move(Block canvas[CANVAS_HEIGHT][CANVAS_WIDTH], int originalX, int original
     Shape shapeData = shapes[shapeId];
     int size = shapeData.size;
 
-    // §PÂ_¤è¶ô¦³¨S¦³¤£²Å¦X±ø¥ó
+    // åˆ¤æ–·æ–°ä½ç½®æ˜¯å¦åˆæ³•
     for (int i = 0; i < size; i++)
     {
         for (int j = 0; j < size; j++)
         {
             if (shapeData.rotates[newRotate][i][j])
             {
-                // §PÂ_¦³¨S¦³¥X¥hÃä¬É
+                // åˆ¤æ–·æ˜¯å¦è¶…å‡ºé‚Šç•Œ
                 if (newX + j < 0 || newX + j >= CANVAS_WIDTH || newY + i < 0 || newY + i >= CANVAS_HEIGHT)
                 {
                     return false;
                 }
-                // §PÂ_¦³¨S¦³¸I¨ì§Oªº¤è¶ô
+                // åˆ¤æ–·æ˜¯å¦ç¢°åˆ°å…¶ä»–æ–¹å¡Š
                 if (!canvas[newY + i][newX + j].current && canvas[newY + i][newX + j].shape != EMPTY)
                 {
                     return false;
@@ -276,7 +327,7 @@ bool move(Block canvas[CANVAS_HEIGHT][CANVAS_WIDTH], int originalX, int original
         }
     }
 
-    // ²¾°£¤è¶ôÂÂªº¦ì¸m
+    // æ¸…é™¤åŸä¾†çš„ä½ç½®
     for (int i = 0; i < size; i++)
     {
         for (int j = 0; j < size; j++)
@@ -288,7 +339,7 @@ bool move(Block canvas[CANVAS_HEIGHT][CANVAS_WIDTH], int originalX, int original
         }
     }
 
-    // ²¾°Ê¤è¶ô¦Ü·sªº¦ì¸m
+    // è¨­ç½®æ–°çš„ä½ç½®
     for (int i = 0; i < size; i++)
     {
         for (int j = 0; j < size; j++)
@@ -303,7 +354,7 @@ bool move(Block canvas[CANVAS_HEIGHT][CANVAS_WIDTH], int originalX, int original
     return true;
 }
 
-int clearLine(Block canvas[CANVAS_HEIGHT][CANVAS_WIDTH])
+int clearLine(Block canvas[CANVAS_HEIGHT][CANVAS_WIDTH], State* state)
 {
     for (int i = 0; i < CANVAS_HEIGHT; i++)
     {
@@ -341,9 +392,32 @@ int clearLine(Block canvas[CANVAS_HEIGHT][CANVAS_WIDTH])
             i++;
         }
     }
+
+    // Handle scoring and plant growth for each line cleared
+    for (int i = 0; i < linesCleared; i++)
+    {
+        // Add 5 points for each line cleared
+        state->score += 5;
+
+        // Advance plant stage
+        if (state->plantStage == SEEDS)
+        {
+            state->plantStage = PLANT;
+        }
+        else if (state->plantStage == PLANT)
+        {
+            state->plantStage = FLOWER;
+        }
+        else if (state->plantStage == FLOWER)
+        {
+            // Flower stage: add 10 bonus points and reset to seeds
+            state->score += 10;
+            state->plantStage = SEEDS;
+        }
+    }
+
     return linesCleared;
 }
-
 
 void logic(Block canvas[CANVAS_HEIGHT][CANVAS_WIDTH], State* state)
 {
@@ -389,7 +463,7 @@ void logic(Block canvas[CANVAS_HEIGHT][CANVAS_WIDTH], State* state)
         }
         else
         {
-            state->score += clearLine(canvas);
+            clearLine(canvas, state);
 
             state->x = CANVAS_WIDTH / 2;
             state->y = 0;
@@ -400,11 +474,13 @@ void logic(Block canvas[CANVAS_HEIGHT][CANVAS_WIDTH], State* state)
             state->queue[2] = state->queue[3];
             state->queue[3] = rand() % 7;
 
-            //µ²§ô¿é¥X
+            //æª¢æŸ¥éŠæˆ²çµæŸ
             if (!move(canvas, state->x, state->y, state->rotate, state->x, state->y, state->rotate, state->queue[0]))
             {
-                printf("\033[%d;%dH\x1b[41m GAME OVER \x1b[0m\033[%d;%dH", CANVAS_HEIGHT - 3, CANVAS_WIDTH * 2 + 5, CANVAS_HEIGHT + 5, 0);
-                exit(0);//µ²§ô¹CÀ¸
+                printf("\033[%d;%dH\x1b[41m GAME OVER \x1b[0m", CANVAS_HEIGHT - 3, CANVAS_WIDTH * 2 + 5);
+                printf("\033[%d;%dH\x1b[36mFinal Score: %d\x1b[0m", CANVAS_HEIGHT - 2, CANVAS_WIDTH * 2 + 5, state->score);
+                printf("\033[%d;%dH", CANVAS_HEIGHT + 5, 0);
+                exit(0);//çµæŸç¨‹å¼
             }
         }
     }
@@ -419,7 +495,8 @@ int main()
         .y = 0,
         .score = 0,
         .rotate = 0,
-        .fallTime = 0 };
+        .fallTime = 0,
+        .plantStage = SEEDS };
 
     for (int i = 0; i < 4; i++)
     {
