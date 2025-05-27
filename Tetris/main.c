@@ -3,6 +3,7 @@
 #include <stdbool.h>
 #include <time.h>
 #include <windows.h>
+#include <conio.h> // 請加在檔案最上方
 
 #define CANVAS_WIDTH 10
 #define CANVAS_HEIGHT 20
@@ -72,6 +73,8 @@ typedef struct
     int fallTime;
     ShapeId queue[4];
     PlantStage plantStage;
+    int flowerCount;      // 本局已開花次數（每開花+1）
+    int flowerStageCount; // 累計開花次數（每2次加10分）
 } State;
 
 typedef struct
@@ -276,6 +279,9 @@ void printCanvas(Block canvas[CANVAS_HEIGHT][CANVAS_WIDTH], State* state)
     // 顯示植物ASCII圖案
     printPlant(state->plantStage, 4, CANVAS_WIDTH * 2 + 5);
 
+    // 顯示Flower累計
+    printf("\033[%d;%dH\033[36mFlower: %d\033[0m", 7, CANVAS_WIDTH * 2 + 5, state->flowerStageCount);
+
     // 顯示Next:
     printf("\033[%d;%dH\033[36mNext:\033[0m", 8, CANVAS_WIDTH * 2 + 5);
     // 顯示接下來的方塊
@@ -327,7 +333,7 @@ bool move(Block canvas[CANVAS_HEIGHT][CANVAS_WIDTH], int originalX, int original
         }
     }
 
-    // 清除原來的位置
+    // 清除原来的位置
     for (int i = 0; i < size; i++)
     {
         for (int j = 0; j < size; j++)
@@ -354,6 +360,7 @@ bool move(Block canvas[CANVAS_HEIGHT][CANVAS_WIDTH], int originalX, int original
     return true;
 }
 
+// 主要變更：全新開花&分數邏輯
 int clearLine(Block canvas[CANVAS_HEIGHT][CANVAS_WIDTH], State* state)
 {
     for (int i = 0; i < CANVAS_HEIGHT; i++)
@@ -380,7 +387,6 @@ int clearLine(Block canvas[CANVAS_HEIGHT][CANVAS_WIDTH], State* state)
         }
         if (isFull) {
             linesCleared += 1;
-
             for (int j = i; j > 0; j--)
             {
                 for (int k = 0; k < CANVAS_WIDTH; k++)
@@ -393,27 +399,34 @@ int clearLine(Block canvas[CANVAS_HEIGHT][CANVAS_WIDTH], State* state)
         }
     }
 
-    // Handle scoring and plant growth for each line cleared
-    for (int i = 0; i < linesCleared; i++)
-    {
-        // Add 5 points for each line cleared
-        state->score += 5;
-
-        // Advance plant stage
-        if (state->plantStage == SEEDS)
-        {
+    // 新增：開花與分數邏輯
+    if (linesCleared == 1) {
+        state->score += 1;
+        // 單行不成長
+    }
+    else if (linesCleared >= 2) {
+        state->score += 5; // 消2+行分
+        // 成長判斷
+        if (state->plantStage == SEEDS) {
             state->plantStage = PLANT;
+            state->score += 5; // 進化分
         }
-        else if (state->plantStage == PLANT)
-        {
+        else if (state->plantStage == PLANT) {
             state->plantStage = FLOWER;
-        }
-        else if (state->plantStage == FLOWER)
-        {
-            // Flower stage: add 10 bonus points and reset to seeds
-            state->score += 10;
+            state->score += 5; // 進化分
+            state->flowerCount++;
+            state->flowerStageCount++;
+            // 顯示花
+            printCanvas(canvas, state);
+            Sleep(2500);
             state->plantStage = SEEDS;
+            printCanvas(canvas, state);
+            // 每2次開花再加10分
+            if (state->flowerStageCount % 2 == 0) {
+                state->score += 10;
+            }
         }
+        // FLOWER階段直接reset不會發生
     }
 
     return linesCleared;
@@ -487,6 +500,28 @@ void logic(Block canvas[CANVAS_HEIGHT][CANVAS_WIDTH], State* state)
     return;
 }
 
+void printStartScreen() {
+    printf("\033[2J\033[H"); // 清螢幕
+    printf("\n");
+    printf("  =============================\n");
+    printf("  |        俄羅斯方塊        |\n");
+    printf("  |    種子→幼苗→開花加分！  |\n");
+    printf("  |  方向鍵移動 空白鍵快落   |\n");
+    printf("  |                          |\n");
+    printf("  |   按 Enter 開始遊戲...   |\n");
+    printf("  =============================\n");
+}
+
+void waitStartKey() {
+    while (1) {
+        if (_kbhit()) {
+            char c = _getch();
+            if (c == '\r' || c == '\n') break; // Enter
+        }
+        Sleep(50);
+    }
+}
+
 int main()
 {
     srand(time(NULL));
@@ -496,7 +531,10 @@ int main()
         .score = 0,
         .rotate = 0,
         .fallTime = 0,
-        .plantStage = SEEDS };
+        .plantStage = SEEDS,
+        .flowerCount = 0,
+        .flowerStageCount = 0
+    };
 
     for (int i = 0; i < 4; i++)
     {
@@ -524,6 +562,11 @@ int main()
             }
         }
     }
+
+    // ===== 新增開場畫面 =====
+    printStartScreen();
+    waitStartKey();
+    printf("\033[2J\033[H"); // 再清一次螢幕，確保開場畫面消失
 
     while (1)
     {
